@@ -56,11 +56,7 @@ has cache_root => (
   default => './cache'
 );
 
-has format => (
-  is => 'rw',
-  default => "json",
-);
-
+has format => (is => 'rw');
 has maxwidth => (is => 'rw');
 has maxheight => (is => 'rw');
 
@@ -71,10 +67,10 @@ sub call {
   if (my $url = $req->parameters->{url}) {
 
     if (my $res = $self->cache->get($url)) {
-      return $res;
+      return jsonp_response($res, $req->parameters);
     }
 
-    elsif (my $service = $self->request_url($url)) {
+    elsif (my $service = $self->request_url($url, $req->parameters)) {
       return sub {
         my $respond = shift;
         http_request "get", $service, sub {
@@ -82,7 +78,7 @@ sub call {
           if ($headers->{Status} == 200) {
             my $res = [200, ["Content-Type", $headers->{"content-type"}], [$body]];
             $self->cache->set($url, $res);
-            $respond->($res);
+            $respond->(jsonp_response($res, $req->parameters));
           }
           $respond->([404, ["Content-Type", "text/plain"], ["not found"]]);
         };
@@ -94,14 +90,26 @@ sub call {
 }
 
 sub request_url {
-  my ($self, $url) = @_;
+  my ($self, $url, $parameters) = @_;
 
-  my $opts = {format => $self->format};
-
-  $opts->{maxwidth}  = $self->maxwidth  if defined $self->maxwidth;
-  $opts->{maxheight} = $self->maxheight if defined $self->maxheight;
+  my $opts = {
+    format    => $parameters->{format}    || $self->format    || "json",
+    maxwidth  => $parameters->{maxwidth}  || $self->maxwidth  || 300,
+    maxheight => $parameters->{maxheight} || $self->maxheight || 300,
+  };
 
   return $self->oembed->request_url($url, $opts);
+}
+
+sub jsonp_response {
+  my ($res, $params) = @_;
+
+  if (my $function = $params->{callback}) {
+    unshift @{$res->[2]}, "$function(";
+    push @{$res->[2]}, ");";
+  }
+
+  return $res;
 }
 
 1;
